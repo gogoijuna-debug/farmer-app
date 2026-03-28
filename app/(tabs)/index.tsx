@@ -22,7 +22,7 @@ import { useRouter } from 'expo-router';
 import { db } from '../../src/lib/firebase';
 import { collection, query, onSnapshot, doc, getDoc, addDoc, serverTimestamp, orderBy, where } from 'firebase/firestore';
 import { useFarmerProfile } from '../../src/context/FarmerProfileContext';
-import { Colors } from '../../src/constants/Colors';
+import { useAuth } from '../../src/context/AuthContext';
 import { useAppTheme } from '../../src/context/ThemeContext';
 import InlineNotice from '../../src/components/InlineNotice';
 import { 
@@ -71,6 +71,7 @@ export default function HomeScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const { profile } = useFarmerProfile();
+  const { loading: authLoading } = useAuth();
   
   const [doctors, setDoctors] = useState<any[]>([]);
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -88,6 +89,8 @@ export default function HomeScreen() {
   const [notice, setNotice] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
   useEffect(() => {
+    if (authLoading) return;
+
     const fetchSettings = async () => {
       const docSnap = await getDoc(doc(db, "settings", "global"));
       if (docSnap.exists()) setWhatsappNumber(docSnap.data().whatsapp || "");
@@ -100,12 +103,19 @@ export default function HomeScreen() {
       setLoading(false);
     });
 
-    const unsubDoctors = onSnapshot(query(collection(db, "users"), where("role", "==", "doctor"), where("active", "==", true)), (snap) => {
-      setDoctors(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
+    const unsubDoctors = onSnapshot(
+      query(collection(db, "users"), where("role", "==", "doctor"), where("active", "==", true)),
+      (snap) => {
+        setDoctors(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      },
+      () => {
+        // Keep the app usable if the directory read is restricted.
+        setDoctors([]);
+      }
+    );
 
     return () => { unsubInventory(); unsubDoctors(); };
-  }, []);
+  }, [authLoading]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearchQuery(searchQuery.trim()), 250);

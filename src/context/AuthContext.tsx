@@ -17,17 +17,21 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        // For farmers, let's auto-sign in anonymously if not logged in to simplify UX
-        try {
-          await signInAnonymously(auth);
-        } catch (e) {
-          console.error("Auth error", e);
-        }
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
+        setLoading(false);
+        return;
       }
-      setUser(user);
-      setLoading(false);
+
+      // No user yet: attempt anonymous auth, then wait for the follow-up auth state callback.
+      try {
+        await signInAnonymously(auth);
+      } catch (e) {
+        console.error("Auth error", e);
+        setUser(null);
+        setLoading(false);
+      }
     });
 
     return () => unsubscribe();
