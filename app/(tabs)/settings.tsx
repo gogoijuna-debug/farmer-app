@@ -88,10 +88,12 @@ export default function SettingsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
-      {/* Premium Branding Header */}
-      <View style={[styles.header, { backgroundColor: theme.card, paddingTop: Math.max(insets.top, 20) }]}>
+      {/* Branding Header */}
+      <View style={{ backgroundColor: theme.tint }}>
+
+      <View style={[styles.header, { backgroundColor: 'transparent', paddingTop: Math.max(insets.top, 20) }]}> 
         <View style={styles.brandingWrapper}>
-          <View style={[styles.logoContainer, { backgroundColor: theme.tint + '10' }]}>
+          <View style={[styles.logoContainer, { backgroundColor: '#ffffff22' }]}> 
             <Image 
               source={require('../../assets/logo.png')} 
               style={styles.logoImage} 
@@ -100,23 +102,25 @@ export default function SettingsScreen() {
           </View>
           <View style={styles.brandingText}>
             <View style={styles.titleRow}>
-              <Text style={[styles.brandingTitleMain, { color: theme.text }]}>Sanjivani</Text>
-              <Text style={[styles.brandingTitleSub, { color: theme.tint }]}> Settings</Text>
+              <Text style={[styles.brandingTitleMain, { color: '#ffffff' }]}>Sanjivani</Text>
+              <Text style={[styles.brandingTitleSub, { color: '#E2E8F0' }]}> Settings</Text>
             </View>
-            <Text style={[styles.brandingSubtitle, { color: theme.textSecondary }]}>App Identity & Preferences</Text>
+            <Text style={[styles.brandingSubtitle, { color: '#F1F5F9' }]}>App Identity & Preferences</Text>
           </View>
         </View>
         
-        <View style={[styles.avatarButton, { backgroundColor: theme.tint + '15', borderColor: theme.tint + '30' }]}>
+        <View style={[styles.avatarButton, { backgroundColor: '#ffffff22', borderColor: '#ffffff50' }]}> 
           {profile?.name ? (
-            <Text style={[styles.avatarText, { color: theme.tint }]}>{profile.name.charAt(0).toUpperCase()}</Text>
+            <Text style={[styles.avatarText, { color: '#ffffff' }]}>{profile.name.charAt(0).toUpperCase()}</Text>
           ) : (
-            <User size={22} color={theme.tint} />
+            <User size={22} color="#ffffff" />
           )}
         </View>
       </View>
+      </View>
 
       <ScrollView contentContainerStyle={styles.content}>
+
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <User size={18} color={theme.tint} />
@@ -257,7 +261,12 @@ const styles = StyleSheet.create({
   brandingSubtitle: { fontSize: 11, fontWeight: '700', marginTop: -2, opacity: 0.8 },
   avatarButton: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5 },
   avatarText: { fontSize: 16, fontWeight: '900' },
-  content: { padding: 24, paddingBottom: 60 },
+  content: { padding: 20, paddingBottom: 60 },
+  profileSummaryCard: { borderRadius: 24, borderWidth: 1, padding: 18, marginBottom: 18, flexDirection: 'row', alignItems: 'center', gap: 14 },
+  profileSummaryTitle: { fontSize: 20, fontWeight: '900', letterSpacing: -0.3 },
+  profileSummaryMeta: { fontSize: 12, fontWeight: '700', marginTop: 2 },
+  editQuickButton: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12 },
+  editQuickButtonText: { color: '#fff', fontSize: 11, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
   section: { marginBottom: 32 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, marginLeft: 4 },
   sectionTitle: { fontSize: 16, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },

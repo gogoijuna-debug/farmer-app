@@ -5,6 +5,7 @@ import { ActivityIndicator, Image, Text, View } from 'react-native';
 import { AuthProvider } from '../src/context/AuthContext';
 import { FarmerProfileProvider } from '../src/context/FarmerProfileContext';
 import { ThemePreferenceProvider, useAppTheme } from '../src/context/ThemeContext';
+import { NotificationsProvider } from '../src/context/NotificationsContext';
 import ErrorBoundary from '../src/components/ErrorBoundary';
 import '../src/i18n';
 
@@ -97,7 +98,9 @@ export default function RootLayout() {
       <AuthProvider>
         <FarmerProfileProvider>
           <ThemePreferenceProvider>
-            <RootNavigator />
+            <NotificationsProvider>
+              <RootNavigator />
+            </NotificationsProvider>
           </ThemePreferenceProvider>
         </FarmerProfileProvider>
       </AuthProvider>

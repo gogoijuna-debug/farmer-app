@@ -25,6 +25,8 @@ import { useFarmerProfile } from '../../src/context/FarmerProfileContext';
 import { useAuth } from '../../src/context/AuthContext';
 import { useAppTheme } from '../../src/context/ThemeContext';
 import InlineNotice from '../../src/components/InlineNotice';
+import NotificationBell from '../../src/components/NotificationBell';
+import { ensureNotification } from '../../src/lib/notifications';
 import { 
   Package, 
   Stethoscope, 
@@ -39,15 +41,23 @@ import {
 
 const Shimmer = ({ width, height, style }: any) => {
   const { resolvedTheme } = useAppTheme();
-  const animatedValue = new Animated.Value(0);
+  const animatedValue = React.useRef(new Animated.Value(0)).current;
+
   React.useEffect(() => {
-    Animated.loop(
+    const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(animatedValue, { toValue: 1, duration: 1000, useNativeDriver: true }),
         Animated.timing(animatedValue, { toValue: 0, duration: 1000, useNativeDriver: true }),
       ])
-    ).start();
-  }, []);
+    );
+    loop.start();
+
+    return () => {
+      loop.stop();
+      animatedValue.stopAnimation();
+    };
+  }, [animatedValue]);
+
   const opacity = animatedValue.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.7] });
   return <Animated.View style={[{ width, height, backgroundColor: resolvedTheme === 'dark' ? '#334155' : '#E2E8F0', opacity }, style]} />;
 };
@@ -67,7 +77,7 @@ interface InventoryItem {
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const { theme } = useAppTheme();
+  const { theme, resolvedTheme } = useAppTheme();
   const { t } = useTranslation();
   const router = useRouter();
   const { profile } = useFarmerProfile();
@@ -159,6 +169,19 @@ export default function HomeScreen() {
         isDirectRequest: true,
         createdAt: serverTimestamp()
       });
+      // Notify clinic staff of the new consultation request
+      ensureNotification({
+        recipientType: 'staff',
+        recipientId: 'all_staff',
+        eventType: 'new_consultation',
+        entityType: 'appointment',
+        entityId: `${profile?.deviceId}-consultation-${Date.now()}`,
+        eventKey: `new_consultation:${profile?.deviceId}:${Date.now()}`,
+        title: 'New consultation request',
+        body: `${profile?.name || 'A farmer'} from ${profile?.village || '—'} submitted a consultation.`,
+        deepLink: '/dashboard/appointments',
+        priority: 'critical',
+      });
       if (whatsappNumber) {
         const msg = encodeURIComponent(`Sanjivani Consultation Request:\n\n*Physician:* Dr. ${selectedDoc.displayName}\n*Farmer:* ${profile?.name}\n*Village:* ${profile?.village}\n*Animal Issue:* ${issueDescription}`);
         Linking.openURL(`whatsapp://send?phone=${whatsappNumber}&text=${msg}`).catch(() => {
@@ -192,6 +215,19 @@ export default function HomeScreen() {
         itemRef: item.id,
         village: profile?.village || "",
         createdAt: serverTimestamp()
+      });
+      // Notify clinic staff of the new order request
+      ensureNotification({
+        recipientType: 'staff',
+        recipientId: 'all_staff',
+        eventType: 'new_order',
+        entityType: 'appointment',
+        entityId: `${profile?.deviceId}-order-${Date.now()}`,
+        eventKey: `new_order:${profile?.deviceId}:${item.id}:${Date.now()}`,
+        title: 'New order request',
+        body: `${profile?.name || 'A farmer'} from ${profile?.village || '—'} ordered ${item.name}.`,
+        deepLink: '/dashboard/appointments',
+        priority: 'normal',
       });
       if (whatsappNumber) {
         const msg = encodeURIComponent(`Sanjivani Order:\n\nItem: ${item.name}\nQuantity: 1 ${item.unit}\nPrice: ₹${item.price}\nFarmer: ${profile?.name}\nVillage: ${profile?.village}`);
@@ -259,11 +295,12 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Sticky Elite Header Hub */}
-        <View style={{ backgroundColor: theme.card, borderBottomWidth: 1, borderBottomColor: theme.border }}>
+        <View style={{ backgroundColor: theme.tint, borderBottomWidth: 1, borderBottomColor: theme.tint }}>
+
           {/* Main Branding Row */}
-          <View style={[styles.header, { backgroundColor: 'transparent', paddingTop: Math.max(insets.top, 20) }]}>
+          <View style={[styles.header, { backgroundColor: 'transparent', paddingTop: Math.max(insets.top, 20) }]}> 
             <View style={styles.brandingWrapper}>
-              <View style={[styles.logoContainer, { backgroundColor: theme.tint + '10' }]}>
+              <View style={[styles.logoContainer, { backgroundColor: '#ffffff26' }]}> 
                 <Image 
                   source={require('../../assets/logo.png')} 
                   style={styles.logoImage} 
@@ -272,24 +309,27 @@ export default function HomeScreen() {
               </View>
               <View style={styles.brandingText}>
                 <View style={styles.titleRow}>
-                  <Text style={[styles.brandingTitleMain, { color: theme.text }]}>Sanjivani</Text>
-                  <Text style={[styles.brandingTitleSub, { color: theme.tint }]}> Vet Care</Text>
+                  <Text style={[styles.brandingTitleMain, { color: '#ffffff' }]}>Sanjivani</Text>
+                  <Text style={[styles.brandingTitleSub, { color: '#E2E8F0' }]}> Vet Care</Text>
                 </View>
-                <Text style={[styles.brandingSubtitle, { color: theme.textSecondary }]}>Your livestock care partner</Text>
+                <Text style={[styles.brandingSubtitle, { color: '#F1F5F9' }]}>Your livestock care partner</Text>
               </View>
             </View>
             
-            <TouchableOpacity 
-              activeOpacity={0.7} 
-              style={[styles.avatarButton, { backgroundColor: theme.tint + '15', borderColor: theme.tint + '30' }]} 
-              onPress={() => router.push('/(tabs)/settings')}
-            >
-              {profile?.name ? (
-                <Text style={[styles.avatarText, { color: theme.tint }]}>{profile.name.charAt(0).toUpperCase()}</Text>
-              ) : (
-                <User size={22} color={theme.tint} />
-              )}
-            </TouchableOpacity>
+            <View style={styles.headerActions}>
+              <NotificationBell />
+              <TouchableOpacity 
+                activeOpacity={0.7} 
+                style={[styles.avatarButton, { backgroundColor: '#ffffff22', borderColor: '#ffffff50' }]} 
+                onPress={() => router.push('/(tabs)/settings')}
+              >
+                {profile?.name ? (
+                  <Text style={[styles.avatarText, { color: '#ffffff' }]}>{profile.name.charAt(0).toUpperCase()}</Text>
+                ) : (
+                  <User size={22} color="#ffffff" />
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Search Bar - Slimmed */}
@@ -440,6 +480,7 @@ const styles = StyleSheet.create({
   brandingTitleMain: { fontSize: 20, fontWeight: '900', letterSpacing: -0.5 },
   brandingTitleSub: { fontSize: 20, fontWeight: '900', letterSpacing: -0.5 },
   brandingSubtitle: { fontSize: 11, fontWeight: '700', marginTop: -2, opacity: 0.8 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   avatarButton: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5 },
   avatarText: { fontSize: 16, fontWeight: '900' },
   stickyBar: { paddingHorizontal: 20, paddingBottom: 16 },

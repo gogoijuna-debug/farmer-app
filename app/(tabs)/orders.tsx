@@ -6,9 +6,10 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../src/lib/firebase';
-import { collection, query, where, onSnapshot, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { useFarmerProfile } from '../../src/context/FarmerProfileContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ensureNotification } from '../../src/lib/notifications';
 import { 
   ShoppingBag, 
   Stethoscope, 
@@ -28,18 +29,27 @@ import { useRouter } from 'expo-router';
 import { Image } from 'react-native';
 import { useAppTheme } from '../../src/context/ThemeContext';
 import InlineNotice from '../../src/components/InlineNotice';
+import NotificationBell from '../../src/components/NotificationBell';
 
 const Shimmer = ({ width, height, style }: any) => {
   const { resolvedTheme } = useAppTheme();
-  const animatedValue = new Animated.Value(0);
+  const animatedValue = React.useRef(new Animated.Value(0)).current;
+
   React.useEffect(() => {
-    Animated.loop(
+    const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(animatedValue, { toValue: 1, duration: 1000, useNativeDriver: true }),
         Animated.timing(animatedValue, { toValue: 0, duration: 1000, useNativeDriver: true }),
       ])
-    ).start();
-  }, []);
+    );
+    loop.start();
+
+    return () => {
+      loop.stop();
+      animatedValue.stopAnimation();
+    };
+  }, [animatedValue]);
+
   const opacity = animatedValue.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.7] });
   return <Animated.View style={[{ width, height, backgroundColor: resolvedTheme === 'dark' ? '#334155' : '#E2E8F0', opacity }, style]} />;
 };
@@ -80,6 +90,12 @@ export default function OrdersScreen() {
   const [activeTab, setActiveTab] = useState<'Orders' | 'Consultations'>('Orders');
   const [viewingRx, setViewingRx] = useState<Order | null>(null);
   const [notice, setNotice] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [clinicBrand, setClinicBrand] = useState({
+    clinicName: 'Sanjivani Vet Care',
+    tagline: 'Excellence in Veterinary Logistics',
+    phone: '+91 94350 00000',
+  });
+  const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const cancelPendingOrder = (order: Order) => {
     Alert.alert(
@@ -124,9 +140,98 @@ export default function OrdersScreen() {
     if (!profile?.phone) return;
     const merged = new Map<string, Order>();
 
+    const loadClinicBrand = async () => {
+      try {
+        const settingsSnap = await getDoc(doc(db, 'settings', 'global'));
+        if (!settingsSnap.exists()) return;
+        const data = settingsSnap.data();
+        setClinicBrand({
+          clinicName: data.clinicName || 'Sanjivani Vet Care',
+          tagline: data.tagline || 'Excellence in Veterinary Logistics',
+          phone: data.whatsapp || data.phone || '+91 94350 00000',
+        });
+      } catch {
+        // Keep defaults when settings are unavailable.
+      }
+    };
+    loadClinicBrand();
+
     const applySnapshot = (snap: any) => {
       snap.docs.forEach((d: any) => {
         merged.set(d.id, { id: d.id, ...d.data() } as Order);
+
+        // Emit farmer-side notifications for current state; eventKey dedupe prevents repeats.
+        const data = d.data();
+        const newStatus: string = data.status || '';
+        const recipientId: string = profile?.deviceId || '';
+
+        if (recipientId) {
+          const isConsultation = (data.type || '').toLowerCase() !== 'order';
+
+          if (newStatus === 'InProgress' || newStatus === 'Accepted') {
+            ensureNotification({
+              recipientType: 'farmer',
+              recipientId,
+              eventType: 'appointment_accepted',
+              entityType: 'appointment',
+              entityId: d.id,
+              eventKey: `appointment_accepted:${d.id}:${newStatus}`,
+              title: isConsultation ? 'Consultation accepted 👨‍⚕️' : 'Order confirmed ✅',
+              body: isConsultation
+                ? 'A doctor has accepted your consultation request.'
+                : 'Your order is being processed by the clinic.',
+              deepLink: '/orders',
+              priority: 'normal',
+            });
+          } else if (newStatus === 'Completed') {
+            const hasPrescription =
+              (data.prescription && data.prescription.length > 0) ||
+              (data.rxList && data.rxList.length > 0);
+
+            if (hasPrescription && isConsultation) {
+              ensureNotification({
+                recipientType: 'farmer',
+                recipientId,
+                eventType: 'prescription_ready',
+                entityType: 'appointment',
+                entityId: d.id,
+                eventKey: `prescription_ready:${d.id}`,
+                title: 'Prescription ready 💊',
+                body: 'Your prescription has been prepared. Tap Activity to view.',
+                deepLink: '/orders',
+                priority: 'critical',
+              });
+            } else {
+              ensureNotification({
+                recipientType: 'farmer',
+                recipientId,
+                eventType: isConsultation ? 'consultation_completed' : 'order_completed',
+                entityType: 'appointment',
+                entityId: d.id,
+                eventKey: `${isConsultation ? 'consultation' : 'order'}_completed:${d.id}`,
+                title: isConsultation ? 'Consultation completed' : 'Order fulfilled 🎉',
+                body: isConsultation
+                  ? 'Your consultation has been resolved by the clinic.'
+                  : 'Your order has been fulfilled and is ready for pickup.',
+                deepLink: '/orders',
+                priority: 'normal',
+              });
+            }
+          } else if (newStatus === 'Cancelled') {
+            ensureNotification({
+              recipientType: 'farmer',
+              recipientId,
+              eventType: 'request_cancelled',
+              entityType: 'appointment',
+              entityId: d.id,
+              eventKey: `cancelled:${d.id}`,
+              title: 'Request cancelled',
+              body: 'Your request has been cancelled by the clinic.',
+              deepLink: '/orders',
+              priority: 'normal',
+            });
+          }
+        }
       });
 
       const sorted = Array.from(merged.values()).sort((a, b) => {
@@ -177,11 +282,23 @@ export default function OrdersScreen() {
     }
 
     return () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
       unsubs.forEach((u) => u());
     };
   }, [profile?.phone, profile?.name, profile?.deviceId, t]);
 
-  const onRefresh = () => setRefreshing(true);
+  const onRefresh = () => {
+    setRefreshing(true);
+    if (refreshTimeoutRef.current) {
+      clearTimeout(refreshTimeoutRef.current);
+    }
+    // Safety fallback so pull-to-refresh always resolves even if listener callback does not fire.
+    refreshTimeoutRef.current = setTimeout(() => {
+      setRefreshing(false);
+    }, 1800);
+  };
 
   const getNormalizedType = (order: Order): 'Order' | 'Consultation' => {
     const type = (order.type || '').toLowerCase();
@@ -297,57 +414,57 @@ export default function OrdersScreen() {
         onRequestClose={() => setViewingRx(null)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: 'white' }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalHeaderTitle}>{t('prescription_label').toUpperCase()}</Text>
-              <TouchableOpacity onPress={() => setViewingRx(null)} style={styles.closeButton}>
-                <X size={20} color="#64748b" />
+          <View style={[styles.modalContent, { backgroundColor: theme.card }]}> 
+            <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}> 
+              <Text style={[styles.modalHeaderTitle, { color: theme.textSecondary }]}>{t('prescription_label').toUpperCase()}</Text>
+              <TouchableOpacity onPress={() => setViewingRx(null)} style={[styles.closeButton, { backgroundColor: theme.background }]}> 
+                <X size={20} color={theme.textSecondary} />
               </TouchableOpacity>
             </View>
 
             <ScrollView contentContainerStyle={styles.modalScroll}>
               {/* Branded Header */}
-              <View style={styles.rxBranding}>
+              <View style={[styles.rxBranding, { borderBottomColor: theme.tint }]}> 
                 <View>
-                  <Text style={styles.rxBrandingTitle}>SANJIVANI <Text style={{ color: '#0f172a' }}>VET CARE</Text></Text>
-                  <Text style={styles.rxBrandingSub}>Excellence in Veterinary Logistics</Text>
+                  <Text style={[styles.rxBrandingTitle, { color: theme.tint }]}>{clinicBrand.clinicName.toUpperCase()}</Text>
+                  <Text style={[styles.rxBrandingSub, { color: theme.textSecondary }]}>{clinicBrand.tagline}</Text>
                 </View>
                 <View style={styles.rxBrandingRight}>
-                   <Phone size={10} color="#10b981" />
-                   <Text style={styles.rxContact}>+91 94350 00000</Text>
+                   <Phone size={10} color={theme.tint} />
+                   <Text style={[styles.rxContact, { color: theme.textSecondary }]}>{clinicBrand.phone}</Text>
                 </View>
               </View>
 
               {/* Patient & Doctor */}
-              <View style={styles.rxInfoGrid}>
+              <View style={[styles.rxInfoGrid, { backgroundColor: theme.background, borderColor: theme.border }]}> 
                 <View style={styles.rxInfoCol}>
-                  <Text style={styles.rxInfoLabel}>Client Identity</Text>
-                  <Text style={styles.rxInfoValue}>{profile?.name}</Text>
+                  <Text style={[styles.rxInfoLabel, { color: theme.textSecondary }]}>Client Identity</Text>
+                  <Text style={[styles.rxInfoValue, { color: theme.text }]}>{profile?.name}</Text>
                 </View>
                 <View style={[styles.rxInfoCol, { alignItems: 'flex-end' }]}>
-                  <Text style={styles.rxInfoLabel}>Physician</Text>
-                  <Text style={[styles.rxInfoValue, { color: '#059669' }]}>Dr. {viewingRx?.assignedDoctorName || 'Sanjivani Expert'}</Text>
-                  <Text style={styles.rxDoctorQuals}>{viewingRx?.assignedDoctorQuals || 'Veterinary Surgeon'}</Text>
+                  <Text style={[styles.rxInfoLabel, { color: theme.textSecondary }]}>Physician</Text>
+                  <Text style={[styles.rxInfoValue, { color: theme.tint }]}>Dr. {viewingRx?.assignedDoctorName || 'Sanjivani Expert'}</Text>
+                  <Text style={[styles.rxDoctorQuals, { color: theme.textSecondary }]}>{viewingRx?.assignedDoctorQuals || 'Veterinary Surgeon'}</Text>
                 </View>
               </View>
 
               {/* Rx Box */}
-              <Text style={styles.rxSymbol}>Rx</Text>
+              <Text style={[styles.rxSymbol, { color: theme.text, borderBottomColor: theme.border }]}>Rx</Text>
 
               {/* Medications */}
               <View style={styles.medsContainer}>
                 {(viewingRx?.prescription || viewingRx?.rxList)?.map((med, idx) => (
-                  <View key={med.id || idx} style={[styles.medItem, idx === 0 && { borderTopWidth: 0 }]}>
+                  <View key={med.id || idx} style={[styles.medItem, { borderTopColor: theme.border }, idx === 0 && { borderTopWidth: 0 }]}>
                     <View style={styles.medMain}>
-                      <Text style={styles.medName}>{med.name || med.medicineName}</Text>
-                      <Text style={styles.medMeta}>{med.dosage || ''} • {med.frequency || ''}</Text>
+                      <Text style={[styles.medName, { color: theme.text }]}>{med.name || med.medicineName}</Text>
+                      <Text style={[styles.medMeta, { color: theme.textSecondary }]}>{med.dosage || ''} • {med.frequency || ''}</Text>
                     </View>
                     <View style={styles.medRight}>
-                      <Text style={styles.medDuration}>{med.duration || ''}</Text>
+                      <Text style={[styles.medDuration, { color: theme.text }]}>{med.duration || ''}</Text>
                     </View>
                     {med.description && (
                       <View style={styles.medDescRow}>
-                        <Text style={styles.medDesc}>"{med.description}"</Text>
+                        <Text style={[styles.medDesc, { color: theme.tint }]}>"{med.description}"</Text>
                       </View>
                     )}
                   </View>
@@ -355,22 +472,22 @@ export default function OrdersScreen() {
               </View>
 
               {/* Footer */}
-              <View style={styles.rxFooter}>
-                 <View style={styles.sealContainer}>
-                    <ShieldCheck size={32} color="#10b981" />
+              <View style={[styles.rxFooter, { borderTopColor: theme.border }]}> 
+                 <View style={[styles.sealContainer, { backgroundColor: theme.tint + '10', borderColor: theme.tint + '25' }]}> 
+                    <ShieldCheck size={32} color={theme.tint} />
                     <View>
-                      <Text style={styles.sealTitle}>Digital Seal of Care</Text>
-                      <Text style={styles.sealSub}>Verified Professional Protocol</Text>
+                      <Text style={[styles.sealTitle, { color: theme.tint }]}>Digital Seal of Care</Text>
+                      <Text style={[styles.sealSub, { color: theme.textSecondary }]}>Verified Professional Protocol</Text>
                     </View>
                  </View>
-                 <Text style={styles.disclaimer}>*This is a computer-generated protocol following tele-consultation analysis.</Text>
+                 <Text style={[styles.disclaimer, { color: theme.textSecondary }]}>*This is a computer-generated protocol following tele-consultation analysis.</Text>
               </View>
             </ScrollView>
 
             {/* Actions */}
-            <View style={styles.modalActions}>
+            <View style={[styles.modalActions, { backgroundColor: theme.card, borderTopColor: theme.border }]}> 
                <TouchableOpacity 
-                 style={styles.shareButton} 
+                 style={[styles.shareButton, { backgroundColor: theme.tint }]} 
                  onPress={() => viewingRx && sharePrescription(viewingRx)}
                >
                  <Share2 size={16} color="white" />
@@ -381,36 +498,41 @@ export default function OrdersScreen() {
         </View>
       </Modal>
 
-      {/* Premium Branding Header */}
-      <View style={[styles.header, { backgroundColor: theme.card, paddingTop: Math.max(insets.top, 20) }]}>
-        <View style={styles.brandingWrapper}>
-          <View style={[styles.logoContainer, { backgroundColor: theme.tint + '10' }]}>
-            <Image 
-              source={require('../../assets/logo.png')} 
-              style={styles.logoImage} 
-              resizeMode="contain" 
-            />
-          </View>
-          <View style={styles.brandingText}>
-            <View style={styles.titleRow}>
-              <Text style={[styles.brandingTitleMain, { color: theme.text }]}>Sanjivani</Text>
-              <Text style={[styles.brandingTitleSub, { color: theme.tint }]}> Activity</Text>
+      {/* Branding Header */}
+      <View style={{ backgroundColor: theme.tint }}>
+        <View style={[styles.header, { backgroundColor: 'transparent', paddingTop: Math.max(insets.top, 20) }]}>
+          <View style={styles.brandingWrapper}>
+            <View style={[styles.logoContainer, { backgroundColor: '#ffffff26' }]}>
+              <Image 
+                source={require('../../assets/logo.png')} 
+                style={styles.logoImage} 
+                resizeMode="contain" 
+              />
             </View>
-            <Text style={[styles.brandingSubtitle, { color: theme.textSecondary }]}>Your history & feedback</Text>
+            <View style={styles.brandingText}>
+              <View style={styles.titleRow}>
+                <Text style={[styles.brandingTitleMain, { color: '#ffffff' }]}>Sanjivani</Text>
+                <Text style={[styles.brandingTitleSub, { color: '#E2E8F0' }]}> Activity</Text>
+              </View>
+              <Text style={[styles.brandingSubtitle, { color: '#F1F5F9' }]}>Your history &amp; feedback</Text>
+            </View>
+          </View>
+
+          <View style={styles.headerActions}>
+            <NotificationBell />
+            <TouchableOpacity 
+              activeOpacity={0.7} 
+              style={[styles.avatarButton, { backgroundColor: '#ffffff22', borderColor: '#ffffff50' }]} 
+              onPress={() => router.push('/(tabs)/settings')}
+            >
+              {profile?.name ? (
+                <Text style={[styles.avatarText, { color: '#ffffff' }]}>{profile.name.charAt(0).toUpperCase()}</Text>
+              ) : (
+                <User size={22} color="#ffffff" />
+              )}
+            </TouchableOpacity>
           </View>
         </View>
-        
-        <TouchableOpacity 
-          activeOpacity={0.7} 
-          style={[styles.avatarButton, { backgroundColor: theme.tint + '15', borderColor: theme.tint + '30' }]} 
-          onPress={() => router.push('/(tabs)/settings')}
-        >
-          {profile?.name ? (
-            <Text style={[styles.avatarText, { color: theme.tint }]}>{profile.name.charAt(0).toUpperCase()}</Text>
-          ) : (
-            <User size={22} color={theme.tint} />
-          )}
-        </TouchableOpacity>
       </View>
 
       <View style={[styles.tabs, { backgroundColor: theme.card, borderColor: theme.border }]}>
@@ -456,6 +578,7 @@ export default function OrdersScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 12 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   brandingWrapper: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   logoContainer: { width: 44, height: 44, borderRadius: 14, overflow: 'hidden', padding: 6, alignItems: 'center', justifyContent: 'center' },
   logoImage: { width: '100%', height: '100%' },
