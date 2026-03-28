@@ -9,47 +9,54 @@ import {
   Platform,
   ActivityIndicator,
   ScrollView,
-  useColorScheme,
   Image
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useFarmerProfile } from '../src/context/FarmerProfileContext';
 import { User, Phone, MapPin } from 'lucide-react-native';
-import { Colors } from '../src/constants/Colors';
+import { useAppTheme } from '../src/context/ThemeContext';
+import InlineNotice from '../src/components/InlineNotice';
 
 export default function OnboardingScreen() {
   const { t } = useTranslation();
   const router = useRouter();
-  const colorScheme = useColorScheme() || 'light';
-  const theme = Colors[colorScheme];
+  const { theme } = useAppTheme();
   const { saveProfile } = useFarmerProfile();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [village, setVillage] = useState('');
   const [isRegistering, setIsRegistering] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<{ name?: string; phone?: string; village?: string; form?: string }>({});
 
   const handleStart = async () => {
     const digitsOnly = phone.replace(/\D/g, '');
-    if (digitsOnly.length !== 10) { setError(t('phone_error')); return; }
+    const nextErrors: { name?: string; phone?: string; village?: string } = {};
+    if (!/^[6-9]\d{9}$/.test(digitsOnly)) nextErrors.phone = t('phone_error');
     
     if (isRegistering) {
-      if (!name.trim()) { setError(t('name_error')); return; }
-      if (!village.trim()) { setError(t('village_error')); return; }
+      if (!name.trim()) nextErrors.name = t('name_error');
+      if (!village.trim()) nextErrors.village = t('village_error');
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setFieldErrors(nextErrors);
+      return;
     }
 
     setSaving(true);
-    setError('');
+    setFieldErrors({});
     try {
-      await saveProfile(isRegistering ? name.trim() : "", phone.trim(), isRegistering ? village.trim() : "");
+      await saveProfile(isRegistering ? name.trim() : "", digitsOnly, isRegistering ? village.trim() : "");
       router.replace('/(tabs)');
     } catch (e: any) {
       if (e.message === 'USER_NOT_FOUND') {
-        setError(t('phone_not_found'));
+        setFieldErrors({ form: t('phone_not_found') });
+      } else if (e.message === 'PHONE_ALREADY_REGISTERED') {
+        setFieldErrors({ phone: t('phone_registered') });
       } else {
-        setError(t('generic_error'));
+        setFieldErrors({ form: t('generic_error') });
       }
     } finally {
       setSaving(false);
@@ -69,39 +76,43 @@ export default function OnboardingScreen() {
         <Text style={[styles.subtitle, { color: theme.textSecondary }]}>{t('tagline')}</Text>
 
         <View style={styles.form}>
+          {!!fieldErrors.form && <InlineNotice type="error" message={fieldErrors.form} />}
+
           {isRegistering && (
             <>
               <Text style={[styles.label, { color: theme.textSecondary }]}>{t('name_label')}</Text>
-              <View style={[styles.inputRow, { backgroundColor: theme.card, borderColor: theme.border }]}>
+              <View style={[styles.inputRow, { backgroundColor: theme.card, borderColor: fieldErrors.name ? '#FCA5A5' : theme.border }]}> 
                 <User size={20} color={theme.textSecondary} style={styles.inputIcon} />
-                <TextInput style={[styles.input, { color: theme.text }]} placeholder={t('name_placeholder')} placeholderTextColor={theme.textSecondary} value={name} onChangeText={setName} autoCapitalize="words" />
+                <TextInput style={[styles.input, { color: theme.text }]} placeholder={t('name_placeholder')} placeholderTextColor={theme.textSecondary} value={name} onChangeText={(value) => { setName(value); setFieldErrors((current) => ({ ...current, name: undefined, form: undefined })); }} autoCapitalize="words" />
               </View>
+              {!!fieldErrors.name && <Text style={styles.errorText}>{fieldErrors.name}</Text>}
             </>
           )}
 
           <Text style={[styles.label, { color: theme.textSecondary }]}>{t('phone_label')}</Text>
-          <View style={[styles.inputRow, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <View style={[styles.inputRow, { backgroundColor: theme.card, borderColor: fieldErrors.phone ? '#FCA5A5' : theme.border }]}> 
             <Phone size={20} color={theme.textSecondary} style={styles.inputIcon} />
-            <TextInput style={[styles.input, { color: theme.text }]} placeholder={t('phone_placeholder')} placeholderTextColor={theme.textSecondary} value={phone} onChangeText={setPhone} keyboardType="phone-pad" maxLength={10} />
+            <TextInput style={[styles.input, { color: theme.text }]} placeholder={t('phone_placeholder')} placeholderTextColor={theme.textSecondary} value={phone} onChangeText={(value) => { setPhone(value.replace(/\D/g, '').slice(0, 10)); setFieldErrors((current) => ({ ...current, phone: undefined, form: undefined })); }} keyboardType="phone-pad" maxLength={10} />
           </View>
+          {!!fieldErrors.phone && <Text style={styles.errorText}>{fieldErrors.phone}</Text>}
+          <Text style={[styles.hintText, { color: theme.textSecondary }]}>{t('phone_hint')}</Text>
 
           {isRegistering && (
             <>
               <Text style={[styles.label, { color: theme.textSecondary }]}>{t('village_label')}</Text>
-              <View style={[styles.inputRow, { backgroundColor: theme.card, borderColor: theme.border }]}>
+              <View style={[styles.inputRow, { backgroundColor: theme.card, borderColor: fieldErrors.village ? '#FCA5A5' : theme.border }]}> 
                 <MapPin size={20} color={theme.textSecondary} style={styles.inputIcon} />
-                <TextInput style={[styles.input, { color: theme.text }]} placeholder={t('village_placeholder')} placeholderTextColor={theme.textSecondary} value={village} onChangeText={setVillage} autoCapitalize="words" />
+                <TextInput style={[styles.input, { color: theme.text }]} placeholder={t('village_placeholder')} placeholderTextColor={theme.textSecondary} value={village} onChangeText={(value) => { setVillage(value); setFieldErrors((current) => ({ ...current, village: undefined, form: undefined })); }} autoCapitalize="words" />
               </View>
+              {!!fieldErrors.village && <Text style={styles.errorText}>{fieldErrors.village}</Text>}
             </>
           )}
-
-          {!!error && <Text style={styles.errorText}>{error}</Text>}
 
           <TouchableOpacity style={[styles.btn, { backgroundColor: theme.tint }, isDisabled && styles.btnDisabled]} onPress={handleStart} disabled={isDisabled}>
             {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>{isRegistering ? t('get_started') : t('sign_in')}</Text>}
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.toggleContainer} onPress={() => { setIsRegistering(!isRegistering); setError(''); }}>
+          <TouchableOpacity style={styles.toggleContainer} onPress={() => { setIsRegistering(!isRegistering); setFieldErrors({}); }}>
             <Text style={[styles.toggleText, { color: theme.textSecondary }]}>
               {isRegistering ? t('already_member') : t('new_here')}
               <Text style={{ color: theme.tint, fontWeight: '900' }}> {isRegistering ? t('sign_in') : t('register_now')}</Text>
@@ -180,6 +191,13 @@ const styles = StyleSheet.create({
     color: '#EF4444',
     fontWeight: '700',
     fontSize: 13,
+    marginTop: -10,
+    marginBottom: 8,
+  },
+  hintText: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: -8,
     marginBottom: 8,
   },
   btn: {

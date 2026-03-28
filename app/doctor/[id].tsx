@@ -8,14 +8,12 @@ import { useTranslation } from 'react-i18next';
 import { db } from '../../src/lib/firebase';
 import { doc, onSnapshot, getDoc } from 'firebase/firestore';
 import { Stethoscope, MessageCircle, User } from 'lucide-react-native';
-import { useColorScheme } from 'react-native';
-import { Colors } from '../../src/constants/Colors';
+import { useAppTheme } from '../../src/context/ThemeContext';
 
 export default function DoctorProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { t } = useTranslation();
-  const colorScheme = useColorScheme() || 'light';
-  const theme = Colors[colorScheme];
+  const { theme } = useAppTheme();
   
   const [doctor, setDoctor] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -51,7 +49,7 @@ export default function DoctorProfileScreen() {
     <ScrollView style={[s.container, { backgroundColor: theme.background }]} contentContainerStyle={s.content}>
       <Stack.Screen options={{ 
         headerShown: true,
-        title: doctor.displayName || t('medicine'),
+        title: doctor.displayName || t('doctor_profile'),
         headerStyle: { backgroundColor: theme.card },
         headerTintColor: theme.text
       }} />
@@ -69,13 +67,18 @@ export default function DoctorProfileScreen() {
           <Text style={[s.name, { color: theme.text }]}>{doctor.displayName}</Text>
           <View style={s.qualRow}>
             <Stethoscope size={16} color={theme.tint} />
-            <Text style={[s.qual, { color: theme.textSecondary }]}>{doctor.qualification || "Veterinary Expert"}</Text>
+            <Text style={[s.qual, { color: theme.textSecondary }]}>{doctor.qualification || t('veterinary_expert')}</Text>
           </View>
+        </View>
+
+        <View style={[s.channelCard, { backgroundColor: theme.card, borderColor: theme.border }]}> 
+          <Text style={[s.channelLabel, { color: theme.textSecondary }]}>{t('response_channel')}</Text>
+          <Text style={[s.channelValue, { color: theme.text }]}>{t('whatsapp_response')}</Text>
         </View>
 
         {doctor.bio && (
           <View style={s.section}>
-            <Text style={[s.sectionTitle, { color: theme.textSecondary }]}>{t('followup_notes')}</Text>
+            <Text style={[s.sectionTitle, { color: theme.textSecondary }]}>{t('experience_summary')}</Text>
             <Text style={[s.bio, { color: theme.text }]}>{doctor.bio}</Text>
           </View>
         )}
@@ -101,6 +104,9 @@ const s = StyleSheet.create({
   name: { fontSize: 28, fontWeight: '900', letterSpacing: -0.5 },
   qualRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   qual: { fontSize: 16, fontWeight: '600' },
+  channelCard: { borderWidth: 1, borderRadius: 16, padding: 14, gap: 4 },
+  channelLabel: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8 },
+  channelValue: { fontSize: 15, fontWeight: '700' },
   section: { gap: 10 },
   sectionTitle: { fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 },
   bio: { fontSize: 16, lineHeight: 26, fontWeight: '500' },

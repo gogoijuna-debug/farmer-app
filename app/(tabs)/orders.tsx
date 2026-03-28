@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, FlatList, RefreshControl,
-  TouchableOpacity, ActivityIndicator, Alert, Animated, useColorScheme, Platform,
+  TouchableOpacity, ActivityIndicator, Alert, Animated, Platform,
   Modal, ScrollView, Linking
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../src/lib/firebase';
-import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { useFarmerProfile } from '../../src/context/FarmerProfileContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { 
@@ -26,10 +26,11 @@ import {
 import { Colors } from '../../src/constants/Colors';
 import { useRouter } from 'expo-router';
 import { Image } from 'react-native';
+import { useAppTheme } from '../../src/context/ThemeContext';
+import InlineNotice from '../../src/components/InlineNotice';
 
 const Shimmer = ({ width, height, style }: any) => {
-  const colorScheme = useColorScheme() || 'light';
-  const theme = Colors[colorScheme];
+  const { resolvedTheme } = useAppTheme();
   const animatedValue = new Animated.Value(0);
   React.useEffect(() => {
     Animated.loop(
@@ -40,7 +41,7 @@ const Shimmer = ({ width, height, style }: any) => {
     ).start();
   }, []);
   const opacity = animatedValue.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.7] });
-  return <Animated.View style={[{ width, height, backgroundColor: colorScheme === 'dark' ? '#334155' : '#E2E8F0', opacity }, style]} />;
+  return <Animated.View style={[{ width, height, backgroundColor: resolvedTheme === 'dark' ? '#334155' : '#E2E8F0', opacity }, style]} />;
 };
 
 interface PrescriptionItem {
@@ -71,14 +72,40 @@ export default function OrdersScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const colorScheme = useColorScheme() || 'light';
-  const theme = Colors[colorScheme];
+  const { theme } = useAppTheme();
   const { profile } = useFarmerProfile();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'Orders' | 'Consultations'>('Orders');
   const [viewingRx, setViewingRx] = useState<Order | null>(null);
+  const [notice, setNotice] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+
+  const cancelPendingOrder = (order: Order) => {
+    Alert.alert(
+      t('cancel_request'),
+      order.issue,
+      [
+        { text: t('cancel'), style: 'cancel' },
+        {
+          text: t('cancel_request'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await updateDoc(doc(db, 'appointments', order.id), {
+                status: 'Cancelled',
+                cancelledAt: serverTimestamp(),
+                cancelledBy: 'farmer',
+              });
+              setNotice({ type: 'success', message: t('request_cancelled') });
+            } catch (error) {
+              setNotice({ type: 'error', message: t('generic_error') });
+            }
+          }
+        }
+      ]
+    );
+  };
 
   const sharePrescription = (order: Order) => {
     let text = `*SANJIVANI VET CARE - Medical Protocol*\n\nRegarding: ${order.issue}\n`;
@@ -94,37 +121,89 @@ export default function OrdersScreen() {
   };
 
   useEffect(() => {
-    if (!profile?.name) return;
-    const q = query(
-      collection(db, 'appointments'),
-      where('farmerName', '==', profile.name),
-      orderBy('createdAt', 'desc')
+    if (!profile?.phone) return;
+    const merged = new Map<string, Order>();
+
+    const applySnapshot = (snap: any) => {
+      snap.docs.forEach((d: any) => {
+        merged.set(d.id, { id: d.id, ...d.data() } as Order);
+      });
+
+      const sorted = Array.from(merged.values()).sort((a, b) => {
+        const aSec = a.createdAt?.seconds || 0;
+        const bSec = b.createdAt?.seconds || 0;
+        return bSec - aSec;
+      });
+
+      setOrders(sorted);
+      setLoading(false);
+      setRefreshing(false);
+    };
+
+    const handleError = (err: any) => {
+      console.error(err);
+      setNotice({ type: 'error', message: t('generic_error') });
+      setLoading(false);
+      setRefreshing(false);
+    };
+
+    const unsubs: Array<() => void> = [];
+
+    // Primary identity key
+    unsubs.push(
+      onSnapshot(
+        query(collection(db, 'appointments'), where('phoneNumber', '==', profile.phone)),
+        { next: applySnapshot, error: handleError }
+      )
     );
-    const unsub = onSnapshot(q, {
-      next: snap => {
-        setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() } as Order)));
-        setLoading(false);
-        setRefreshing(false);
-      },
-      error: err => {
-        console.error(err);
-        setLoading(false);
-        setRefreshing(false);
-      }
-    });
-    return () => unsub();
-  }, [profile]);
+
+    // Legacy records fallback (older records may not have normalized phone fields)
+    if (profile?.name) {
+      unsubs.push(
+        onSnapshot(
+          query(collection(db, 'appointments'), where('farmerName', '==', profile.name)),
+          { next: applySnapshot, error: handleError }
+        )
+      );
+    }
+
+    if (profile?.deviceId) {
+      unsubs.push(
+        onSnapshot(
+          query(collection(db, 'appointments'), where('farmerId', '==', profile.deviceId)),
+          { next: applySnapshot, error: handleError }
+        )
+      );
+    }
+
+    return () => {
+      unsubs.forEach((u) => u());
+    };
+  }, [profile?.phone, profile?.name, profile?.deviceId, t]);
 
   const onRefresh = () => setRefreshing(true);
 
-  const filteredData = orders.filter(o => 
-    activeTab === 'Orders' ? o.type === 'Order' : (o.type === 'Consultation' || !o.type)
+  const getNormalizedType = (order: Order): 'Order' | 'Consultation' => {
+    const type = (order.type || '').toLowerCase();
+    if (type === 'order') return 'Order';
+    if (type === 'consultation' || type === 'visit' || !type) return 'Consultation';
+    if ((order.issue || '').toLowerCase().includes('order')) return 'Order';
+    return 'Consultation';
+  };
+
+  const filteredData = orders.filter((o) =>
+    activeTab === 'Orders' ? getNormalizedType(o) === 'Order' : getNormalizedType(o) === 'Consultation'
   );
 
   const renderItem = ({ item }: { item: Order }) => {
     const isPending = item.status === 'Pending';
-    const isConsult = item.type === 'Consultation' || !item.type;
+    const isConsult = getNormalizedType(item) === 'Consultation';
     const hasPrescription = (item.prescription && item.prescription.length > 0) || (item.rxList && item.rxList.length > 0);
+    const statusHint = item.status === 'Pending'
+      ? t('pending_status_hint')
+      : item.status === 'Cancelled'
+      ? t('cancelled_status_hint')
+      : t('completed_status_hint');
 
     return (
       <View style={[styles.card, { backgroundColor: theme.card, borderLeftColor: isPending ? '#F59E0B' : '#059669' }]}>
@@ -162,6 +241,8 @@ export default function OrdersScreen() {
           </View>
         </View>
 
+        <Text style={[styles.statusHint, { color: theme.textSecondary }]}>{statusHint}</Text>
+
         {item.doctorNotes && (
           <View style={[styles.notesContainer, { backgroundColor: theme.tint + '08', borderColor: theme.tint + '20' }]}>
             <View style={styles.notesHeader}>
@@ -178,7 +259,16 @@ export default function OrdersScreen() {
             onPress={() => setViewingRx(item)}
           >
             <Pill size={14} color="white" />
-            <Text style={styles.rxButtonText}>View Prescription</Text>
+            <Text style={styles.rxButtonText}>{t('prescription_label')}</Text>
+          </TouchableOpacity>
+        )}
+
+        {item.type === 'Order' && item.status === 'Pending' && (
+          <TouchableOpacity
+            style={styles.cancelButton}
+            onPress={() => cancelPendingOrder(item)}
+          >
+            <Text style={styles.cancelButtonText}>{t('cancel_request')}</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -209,7 +299,7 @@ export default function OrdersScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: 'white' }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalHeaderTitle}>CLINICAL PROTOCOL</Text>
+              <Text style={styles.modalHeaderTitle}>{t('prescription_label').toUpperCase()}</Text>
               <TouchableOpacity onPress={() => setViewingRx(null)} style={styles.closeButton}>
                 <X size={20} color="#64748b" />
               </TouchableOpacity>
@@ -284,7 +374,7 @@ export default function OrdersScreen() {
                  onPress={() => viewingRx && sharePrescription(viewingRx)}
                >
                  <Share2 size={16} color="white" />
-                 <Text style={styles.shareButtonText}>Share via WhatsApp</Text>
+                 <Text style={styles.shareButtonText}>{t('share_whatsapp')}</Text>
                </TouchableOpacity>
             </View>
           </View>
@@ -339,6 +429,12 @@ export default function OrdersScreen() {
         ))}
       </View>
 
+      {notice && (
+        <View style={styles.noticeWrap}>
+          <InlineNotice type={notice.type} message={notice.message} />
+        </View>
+      )}
+
       <FlatList
         data={(loading ? [1, 2, 3] : filteredData) as any}
         renderItem={loading ? SkeletonItem : renderItem}
@@ -379,6 +475,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
   },
+  noticeWrap: { marginHorizontal: 20, marginTop: 12 },
   tab: {
     flex: 1,
     flexDirection: 'row',
@@ -399,6 +496,12 @@ const styles = StyleSheet.create({
     borderLeftWidth: 6,
     shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.05, shadowRadius: 10, elevation: 3,
+  },
+  statusHint: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: -4,
+    marginBottom: 2,
   },
   cardHeader: {
     flexDirection: 'row', 
@@ -484,6 +587,22 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     textTransform: 'uppercase',
     letterSpacing: 1,
+  },
+  cancelButton: {
+    marginTop: 12,
+    borderRadius: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    backgroundColor: '#FEF2F2',
+  },
+  cancelButtonText: {
+    color: '#DC2626',
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
   },
   empty: {
     alignItems: 'center', 

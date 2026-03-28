@@ -1,13 +1,14 @@
-import { Tabs } from 'expo-router';
+import { Tabs, Redirect } from 'expo-router';
 import { Home, ShoppingBag, Settings, ClipboardList } from 'lucide-react-native';
 import { useFarmerProfile } from '../../src/context/FarmerProfileContext';
-import { View, ActivityIndicator, useColorScheme } from 'react-native';
-import { Colors } from '../../src/constants/Colors';
+import { View, ActivityIndicator } from 'react-native';
+import { useAppTheme } from '../../src/context/ThemeContext';
+import { useTranslation } from 'react-i18next';
 
 export default function TabLayout() {
-  const { loading } = useFarmerProfile();
-  const colorScheme = useColorScheme() || 'light';
-  const theme = Colors[colorScheme];
+  const { loading, hasOnboarded } = useFarmerProfile();
+  const { theme } = useAppTheme();
+  const { t } = useTranslation();
 
   if (loading) {
     return (
@@ -15,6 +16,10 @@ export default function TabLayout() {
         <ActivityIndicator size="large" color={theme.tint} />
       </View>
     );
+  }
+
+  if (!hasOnboarded) {
+    return <Redirect href="/onboarding" />;
   }
 
   return (
@@ -43,21 +48,21 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          tabBarLabel: 'Sanjivani',
+          tabBarLabel: t('home_tab'),
           tabBarIcon: ({ color, size }) => <Home size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="orders"
         options={{
-          tabBarLabel: 'Activity',
+          tabBarLabel: t('activity_tab'),
           tabBarIcon: ({ color, size }) => <ShoppingBag size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="settings"
         options={{
-          tabBarLabel: 'Settings',
+          tabBarLabel: t('settings'),
           tabBarIcon: ({ color, size }) => <Settings size={size} color={color} />,
         }}
       />

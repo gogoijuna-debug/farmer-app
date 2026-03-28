@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, Linking, ActivityIndicator, Alert, Image, useColorScheme
+  TouchableOpacity, Linking, ActivityIndicator, Alert, Image
 } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { useTranslation } from 'react-i18next';
@@ -9,13 +9,12 @@ import { db } from '../../src/lib/firebase';
 import { doc, getDoc, addDoc, collection, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { useFarmerProfile } from '../../src/context/FarmerProfileContext';
 import { Package, ShoppingBag, AlertTriangle, CheckCircle } from 'lucide-react-native';
-import { Colors } from '../../src/constants/Colors';
+import { useAppTheme } from '../../src/context/ThemeContext';
 
 export default function ItemDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { t } = useTranslation();
-  const colorScheme = useColorScheme() || 'light';
-  const theme = Colors[colorScheme];
+  const { theme } = useAppTheme();
   const { profile } = useFarmerProfile();
   
   const [item, setItem] = useState<any>(null);
@@ -23,6 +22,7 @@ export default function ItemDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [ordering, setOrdering] = useState(false);
   const [ordered, setOrdered] = useState(false);
+  const [quantity, setQuantity] = useState(1);
 
   useEffect(() => {
     if (!id) return;
@@ -38,22 +38,28 @@ export default function ItemDetailScreen() {
 
   const handleOrder = async () => {
     if (!item) return;
+    if ((item.stock || 0) <= 0) {
+      Alert.alert(t('out_of_stock'));
+      return;
+    }
     setOrdering(true);
     try {
       await addDoc(collection(db, 'appointments'), {
+        farmerId: profile?.deviceId || profile?.phone || 'unknown',
         farmerName: profile?.name || 'Unknown Farmer',
         phoneNumber: profile?.phone || 'N/A',
-        issue: `Order: ${item.name} (${item.category}) - ₹${item.price}`,
-        price: Number(item.price),
+        issue: `Order: ${item.name} x${quantity} (${item.category}) - ₹${Number(item.price) * quantity}`,
+        price: Number(item.price) * quantity,
         status: 'Pending',
         type: 'Order',
         itemRef: item.id,
+        itemQuantity: quantity,
         createdAt: serverTimestamp(),
         village: profile?.village || "",
       });
       if (whatsappNumber) {
         const msg = encodeURIComponent(
-          `Sanjivani Order:\nItem: ${item.name}\nCategory: ${item.category}\nPrice: ₹${item.price}\nFarmer: ${profile?.name}\nPhone: ${profile?.phone}`
+          `Sanjivani Order:\nItem: ${item.name}\nCategory: ${item.category}\nQuantity: ${quantity} ${item.unit}\nTotal: ₹${Number(item.price) * quantity}\nFarmer: ${profile?.name}\nPhone: ${profile?.phone}`
         );
         const url = `whatsapp://send?phone=${whatsappNumber}&text=${msg}`;
         const ok = await Linking.canOpenURL(url);
@@ -72,6 +78,7 @@ export default function ItemDetailScreen() {
 
   const isMedicine = item.category === 'Medicine';
   const isLow = (item.stock || 0) <= 5;
+  const isOutOfStock = (item.stock || 0) <= 0;
 
   return (
     <ScrollView style={[s.container, { backgroundColor: theme.background }]} contentContainerStyle={s.content}>
@@ -134,18 +141,32 @@ export default function ItemDetailScreen() {
           </View>
         </View>
 
+        <View style={[s.qtyCard, { backgroundColor: theme.card, borderColor: theme.border }]}> 
+          <Text style={[s.qtyLabel, { color: theme.textSecondary }]}>{t('quantity')}</Text>
+          <View style={s.qtyControls}>
+            <TouchableOpacity style={[s.qtyButton, { borderColor: theme.border }]} onPress={() => setQuantity((current) => Math.max(1, current - 1))}>
+              <Text style={[s.qtyButtonText, { color: theme.text }]}>-</Text>
+            </TouchableOpacity>
+            <Text style={[s.qtyValue, { color: theme.text }]}>{quantity}</Text>
+            <TouchableOpacity style={[s.qtyButton, { borderColor: theme.border }]} onPress={() => setQuantity((current) => Math.min(Number(item.stock) || 1, current + 1))} disabled={isOutOfStock}>
+              <Text style={[s.qtyButtonText, { color: theme.text }]}>+</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={[s.totalText, { color: theme.tint }]}>{t('total_amount')}: ₹{Number(item.price) * quantity}</Text>
+        </View>
+
         {ordered ? (
           <View style={[s.successBox, { backgroundColor: theme.tint + '15' }]}>
             <CheckCircle size={24} color={theme.tint} />
             <Text style={[s.successText, { color: theme.tint }]}>{t('order_placed')}</Text>
           </View>
         ) : (
-          <TouchableOpacity style={[s.btn, { backgroundColor: theme.tint }, ordering && s.btnLoading]} onPress={handleOrder} disabled={ordering}>
+          <TouchableOpacity style={[s.btn, { backgroundColor: isOutOfStock ? '#94A3B8' : theme.tint }, ordering && s.btnLoading]} onPress={handleOrder} disabled={ordering || isOutOfStock}>
             {ordering
               ? <ActivityIndicator color="#fff" />
               : <>
                   <ShoppingBag size={20} color="#fff" style={{ marginRight: 8 }} />
-                  <Text style={s.btnText}>{t('order_via_whatsapp')}</Text>
+                  <Text style={s.btnText}>{isOutOfStock ? t('out_of_stock') : t('order_via_whatsapp')}</Text>
                 </>
             }
           </TouchableOpacity>
@@ -171,6 +192,13 @@ const s = StyleSheet.create({
   name: { fontSize: 28, fontWeight: '900', letterSpacing: -0.5 },
   desc: { fontSize: 15, fontWeight: '500', lineHeight: 24 },
   statsRow: { flexDirection: 'row', borderRadius: 24, padding: 20, alignItems: 'center', borderWidth: 1 },
+  qtyCard: { borderRadius: 24, padding: 20, borderWidth: 1, gap: 12 },
+  qtyLabel: { fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
+  qtyControls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  qtyButton: { width: 44, height: 44, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  qtyButtonText: { fontSize: 24, fontWeight: '800' },
+  qtyValue: { fontSize: 24, fontWeight: '900' },
+  totalText: { fontSize: 16, fontWeight: '900' },
   priceWrapper: { flex: 1.2 },
   stat: { flex: 1, alignItems: 'center' },
   statLabel: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },

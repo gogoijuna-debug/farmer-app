@@ -15,7 +15,6 @@ import {
   Alert,
   Image,
   Animated,
-  useColorScheme
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -24,6 +23,8 @@ import { db } from '../../src/lib/firebase';
 import { collection, query, onSnapshot, doc, getDoc, addDoc, serverTimestamp, orderBy, where } from 'firebase/firestore';
 import { useFarmerProfile } from '../../src/context/FarmerProfileContext';
 import { Colors } from '../../src/constants/Colors';
+import { useAppTheme } from '../../src/context/ThemeContext';
+import InlineNotice from '../../src/components/InlineNotice';
 import { 
   Package, 
   Stethoscope, 
@@ -37,7 +38,7 @@ import {
 } from 'lucide-react-native';
 
 const Shimmer = ({ width, height, style }: any) => {
-  const colorScheme = useColorScheme();
+  const { resolvedTheme } = useAppTheme();
   const animatedValue = new Animated.Value(0);
   React.useEffect(() => {
     Animated.loop(
@@ -48,7 +49,7 @@ const Shimmer = ({ width, height, style }: any) => {
     ).start();
   }, []);
   const opacity = animatedValue.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.7] });
-  return <Animated.View style={[{ width, height, backgroundColor: colorScheme === 'dark' ? '#334155' : '#E2E8F0', opacity }, style]} />;
+  return <Animated.View style={[{ width, height, backgroundColor: resolvedTheme === 'dark' ? '#334155' : '#E2E8F0', opacity }, style]} />;
 };
 
 interface InventoryItem {
@@ -66,8 +67,7 @@ interface InventoryItem {
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const colorScheme = useColorScheme() || 'light';
-  const theme = Colors[colorScheme];
+  const { theme } = useAppTheme();
   const { t } = useTranslation();
   const router = useRouter();
   const { profile } = useFarmerProfile();
@@ -79,11 +79,13 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<"All" | "Medicine" | "Feed">("All");
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<any>(null);
   const [issueDescription, setIssueDescription] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [notice, setNotice] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -106,11 +108,18 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearchQuery(searchQuery.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => {
     let result = items;
     if (selectedCategory !== "All") result = result.filter(i => i.category === selectedCategory);
-    if (searchQuery) result = result.filter(i => i.name.toLowerCase().includes(searchQuery.toLowerCase()));
+    if (debouncedSearchQuery) {
+      result = result.filter(i => i.name.toLowerCase().includes(debouncedSearchQuery.toLowerCase()));
+    }
     setFilteredItems(result);
-  }, [searchQuery, selectedCategory, items]);
+  }, [debouncedSearchQuery, selectedCategory, items]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -118,10 +127,16 @@ export default function HomeScreen() {
   };
 
   const handleConsultationSubmit = async () => {
-    if (!issueDescription.trim() || !selectedDoc) return;
+    if (!issueDescription.trim()) {
+      setNotice({ type: 'error', message: t('issue_required') });
+      return;
+    }
+    if (!selectedDoc) return;
+
     setIsSubmitting(true);
     try {
       await addDoc(collection(db, "appointments"), {
+        farmerId: profile?.deviceId || profile?.phone || "unknown",
         farmerName: profile?.name || "Farmer",
         phoneNumber: profile?.phone || "N/A",
         issue: issueDescription,
@@ -143,16 +158,22 @@ export default function HomeScreen() {
       setIsModalVisible(false);
       setIssueDescription("");
       setSelectedDoc(null);
+      setNotice({ type: 'success', message: t('consultation_sent') });
     } catch (e) {
-      Alert.alert(t('generic_error'));
+      setNotice({ type: 'error', message: t('generic_error') });
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleOrderItem = async (item: InventoryItem) => {
+    if (item.stock <= 0) {
+      setNotice({ type: 'error', message: t('out_of_stock') });
+      return;
+    }
     try {
       await addDoc(collection(db, "appointments"), {
+        farmerId: profile?.deviceId || profile?.phone || "unknown",
         farmerName: profile?.name || "Farmer",
         phoneNumber: profile?.phone || "N/A",
         issue: `Order Request: ${item.name}`,
@@ -163,12 +184,15 @@ export default function HomeScreen() {
         createdAt: serverTimestamp()
       });
       if (whatsappNumber) {
-        const msg = encodeURIComponent(`Sanjivani Order:\n\nItem: ${item.name}\nPrice: ₹${item.price}\nFarmer: ${profile?.name}\nVillage: ${profile?.village}`);
+        const msg = encodeURIComponent(`Sanjivani Order:\n\nItem: ${item.name}\nQuantity: 1 ${item.unit}\nPrice: ₹${item.price}\nFarmer: ${profile?.name}\nVillage: ${profile?.village}`);
         Linking.openURL(`whatsapp://send?phone=${whatsappNumber}&text=${msg}`).catch(() => {
           Linking.openURL(`https://wa.me/${whatsappNumber}?text=${msg}`);
         });
       }
-    } catch (e) { Alert.alert(t('generic_error')); }
+      setNotice({ type: 'success', message: t('order_request_sent') });
+    } catch (e) {
+      setNotice({ type: 'error', message: t('generic_error') });
+    }
   };
 
   const renderItem = ({ item }: { item: InventoryItem }) => (
@@ -201,9 +225,16 @@ export default function HomeScreen() {
           <View style={[styles.stockBadge, { backgroundColor: item.stock <= 5 ? '#FEE2E2' : theme.background }]}>
             <Text style={[styles.stockText, { color: item.stock <= 5 ? '#EF4444' : theme.textSecondary }]}>{item.stock} {item.unit} {t('left')}</Text>
           </View>
-          <TouchableOpacity style={[styles.orderButton, { backgroundColor: theme.tint + '10', borderColor: theme.tint + '30' }]} onPress={() => handleOrderItem(item)}>
-            <ShoppingBag size={14} color={theme.tint} style={{ marginRight: 4 }} />
-            <Text style={[styles.orderButtonText, { color: theme.tint }]}>{t('order_whatsapp')}</Text>
+          <TouchableOpacity
+            style={[
+              styles.orderButton,
+              { backgroundColor: item.stock <= 0 ? '#E2E8F0' : theme.tint + '10', borderColor: item.stock <= 0 ? '#CBD5E1' : theme.tint + '30' }
+            ]}
+            onPress={() => handleOrderItem(item)}
+            disabled={item.stock <= 0}
+          >
+            <ShoppingBag size={14} color={item.stock <= 0 ? '#64748B' : theme.tint} style={{ marginRight: 4 }} />
+            <Text style={[styles.orderButtonText, { color: item.stock <= 0 ? '#64748B' : theme.tint }]}>{item.stock <= 0 ? t('out_of_stock') : t('order_whatsapp')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -266,11 +297,17 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {notice && (
+          <View style={styles.noticeWrap}>
+            <InlineNotice type={notice.type} message={notice.message} />
+          </View>
+        )}
+
         {/* Meet Experts Carousel */}
         {doctors.length > 0 && (
           <View style={styles.doctorsSection}>
             <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>CONSULT LIVE EXPERTS</Text>
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('consult_live_experts')}</Text>
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.doctorsScroll}>
               {doctors.map(doc => (
@@ -290,14 +327,14 @@ export default function HomeScreen() {
                       }}
                     >
                       <Stethoscope size={14} color="white" />
-                      <Text style={styles.doctorConsultBtnText}>Consult</Text>
+                      <Text style={styles.doctorConsultBtnText}>{t('consult_cta')}</Text>
                     </TouchableOpacity>
                     
                     <TouchableOpacity 
                       style={[styles.doctorProfileBtnMinor, { borderColor: theme.border }]}
                       onPress={() => router.push({ pathname: '/doctor/[id]', params: { id: doc.id } } as any)}
                     >
-                      <Text style={[styles.doctorProfileBtnTextMinor, { color: theme.textSecondary }]}>Info</Text>
+                      <Text style={[styles.doctorProfileBtnTextMinor, { color: theme.textSecondary }]}>{t('info_cta')}</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -338,7 +375,24 @@ export default function HomeScreen() {
 
         <View style={styles.listContainer}>
           {loading ? [1, 2, 3].map(i => <View key={i} style={[styles.itemCard, { backgroundColor: theme.card, height: 100, marginBottom: 16 }]} />) : 
-            filteredItems.map(item => <View key={item.id}>{renderItem({ item })}</View>)}
+            filteredItems.length > 0 ? filteredItems.map(item => <View key={item.id}>{renderItem({ item })}</View>) : (
+              <View style={[styles.emptyState, { backgroundColor: theme.card, borderColor: theme.border }]}> 
+                <Package size={36} color={theme.textSecondary} />
+                <Text style={[styles.emptyStateTitle, { color: theme.text }]}>{t('search_empty_title')}</Text>
+                <Text style={[styles.emptyStateText, { color: theme.textSecondary }]}>{t('search_empty_description')}</Text>
+                {(searchQuery || selectedCategory !== 'All') && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setSearchQuery('');
+                      setSelectedCategory('All');
+                    }}
+                    style={[styles.browseAllButton, { backgroundColor: theme.tint + '12' }]}
+                  >
+                    <Text style={[styles.browseAllText, { color: theme.tint }]}>{t('browse_all')}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
         </View>
       </ScrollView>
 
@@ -379,6 +433,7 @@ const styles = StyleSheet.create({
   avatarButton: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5 },
   avatarText: { fontSize: 16, fontWeight: '900' },
   stickyBar: { paddingHorizontal: 20, paddingBottom: 16 },
+  noticeWrap: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 6 },
   searchContainer: { flexDirection: 'row', alignItems: 'center', borderRadius: 16, height: 50 },
   searchInput: { flex: 1, paddingHorizontal: 12, fontSize: 14, fontWeight: '600' },
   heroButton: { margin: 20, marginVertical: 10, borderRadius: 28, padding: 24, flexDirection: 'row', alignItems: 'center', elevation: 6 },
@@ -437,4 +492,10 @@ const styles = StyleSheet.create({
   modalInput: { borderRadius: 20, padding: 20, height: 120, fontSize: 15, fontWeight: '500', borderWidth: 1, marginBottom: 24 },
   modalSubmitButton: { height: 60, borderRadius: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', elevation: 4 },
   modalSubmitText: { color: '#fff', fontSize: 16, fontWeight: '900', textTransform: 'uppercase' }
+  ,
+  emptyState: { borderRadius: 24, borderWidth: 1, padding: 28, alignItems: 'center', gap: 10 },
+  emptyStateTitle: { fontSize: 18, fontWeight: '900' },
+  emptyStateText: { fontSize: 13, fontWeight: '600', textAlign: 'center' },
+  browseAllButton: { marginTop: 4, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
+  browseAllText: { fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 }
 });
