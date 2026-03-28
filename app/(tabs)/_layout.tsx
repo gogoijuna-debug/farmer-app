@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Home, ShoppingBag, Settings } from 'lucide-react-native';
+import { Home, ShoppingBag, Settings, ClipboardList } from 'lucide-react-native';
 import { useFarmerProfile } from '../../src/context/FarmerProfileContext';
 import { View, ActivityIndicator, useColorScheme } from 'react-native';
 import { Colors } from '../../src/constants/Colors';

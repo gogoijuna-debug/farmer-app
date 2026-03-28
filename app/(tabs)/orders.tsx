@@ -60,8 +60,11 @@ interface Order {
   createdAt: any;
   doctorNotes?: string;
   prescription?: PrescriptionItem[];
+  rxList?: any[]; // Backward compatibility
   assignedDoctorName?: string;
   assignedDoctorQuals?: string;
+  animalType?: string;
+  breed?: string;
 }
 
 export default function OrdersScreen() {
@@ -79,10 +82,11 @@ export default function OrdersScreen() {
 
   const sharePrescription = (order: Order) => {
     let text = `*SANJIVANI VET CARE - Medical Protocol*\n\nRegarding: ${order.issue}\n`;
-    if (order.prescription && order.prescription.length > 0) {
+    const meds = order.prescription || order.rxList;
+    if (meds && meds.length > 0) {
       text += `\n*Prescribed Medications:*\n`;
-      order.prescription.forEach((m, i) => {
-        text += `${i + 1}. ${m.name} (${m.dosage}) - ${m.frequency} for ${m.duration}\n`;
+      meds.forEach((m, i) => {
+        text += `${i + 1}. ${m.name || m.medicineName} (${m.dosage || ''}) - ${m.frequency || ''} for ${m.duration || ''}\n`;
       });
     }
     const message = encodeURIComponent(text);
@@ -120,6 +124,8 @@ export default function OrdersScreen() {
   const renderItem = ({ item }: { item: Order }) => {
     const isPending = item.status === 'Pending';
     const isConsult = item.type === 'Consultation' || !item.type;
+    const hasPrescription = (item.prescription && item.prescription.length > 0) || (item.rxList && item.rxList.length > 0);
+
     return (
       <View style={[styles.card, { backgroundColor: theme.card, borderLeftColor: isPending ? '#F59E0B' : '#059669' }]}>
         <View style={styles.cardHeader}>
@@ -130,8 +136,16 @@ export default function OrdersScreen() {
             }
           </View>
           <View style={styles.cardContent}>
-            <Text style={[styles.cardTitle, { color: theme.text }]} numberOfLines={2}>{item.issue}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={[styles.cardTitle, { color: theme.text }]} numberOfLines={1}>{item.issue}</Text>
+              {item.animalType && (
+                <View style={{ backgroundColor: theme.tint + '10', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                  <Text style={{ fontSize: 8, fontWeight: '900', color: theme.tint, textTransform: 'uppercase' }}>{item.animalType}</Text>
+                </View>
+              )}
+            </View>
             <Text style={[styles.cardMeta, { color: theme.textSecondary }]}>
+              {item.breed ? `${item.breed} • ` : ''}
               {item.createdAt?.seconds
                 ? new Date(item.createdAt.seconds * 1000).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
                 : 'Just now'}
@@ -232,14 +246,14 @@ export default function OrdersScreen() {
 
               {/* Medications */}
               <View style={styles.medsContainer}>
-                {viewingRx?.prescription?.map((med, idx) => (
-                  <View key={med.id} style={[styles.medItem, idx === 0 && { borderTopWidth: 0 }]}>
+                {(viewingRx?.prescription || viewingRx?.rxList)?.map((med, idx) => (
+                  <View key={med.id || idx} style={[styles.medItem, idx === 0 && { borderTopWidth: 0 }]}>
                     <View style={styles.medMain}>
-                      <Text style={styles.medName}>{med.name}</Text>
-                      <Text style={styles.medMeta}>{med.dosage} • {med.frequency}</Text>
+                      <Text style={styles.medName}>{med.name || med.medicineName}</Text>
+                      <Text style={styles.medMeta}>{med.dosage || ''} • {med.frequency || ''}</Text>
                     </View>
                     <View style={styles.medRight}>
-                      <Text style={styles.medDuration}>{med.duration}</Text>
+                      <Text style={styles.medDuration}>{med.duration || ''}</Text>
                     </View>
                     {med.description && (
                       <View style={styles.medDescRow}>

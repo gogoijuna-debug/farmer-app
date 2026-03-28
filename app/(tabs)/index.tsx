@@ -58,6 +58,8 @@ interface InventoryItem {
   stock: number;
   unit: string;
   price: number;
+  mrp?: number;
+  discountPercentage?: number;
   description?: string;
   imageUrl?: string;
 }
@@ -180,7 +182,19 @@ export default function HomeScreen() {
       <View style={styles.itemInfo}>
         <Text style={[styles.itemName, { color: theme.text }]} numberOfLines={1}>{item.name}</Text>
         <View style={styles.priceRow}>
-          <Text style={[styles.itemPrice, { color: theme.tint }]}>₹{item.price}</Text>
+          <View style={styles.priceContainer}>
+            <Text style={[styles.itemPrice, { color: theme.tint }]}>₹{item.price}</Text>
+            {item.mrp && item.mrp > item.price && (
+              <Text style={[styles.itemMrp, { color: theme.textSecondary }]}>₹{item.mrp}</Text>
+            )}
+            {item.discountPercentage && item.discountPercentage > 0 && (
+              <View style={[styles.discountBadge, { backgroundColor: theme.tint + '15' }]}>
+                <Text style={[styles.discountText, { color: theme.tint }]}>
+                  {item.discountPercentage}% {t('discount')}
+                </Text>
+              </View>
+            )}
+          </View>
           <Text style={[styles.itemUnit, { color: theme.textSecondary }]}>/ {item.unit}</Text>
         </View>
         <View style={styles.cardFooter}>
@@ -403,7 +417,11 @@ const styles = StyleSheet.create({
   itemInfo: { padding: 16 },
   itemName: { fontSize: 18, fontWeight: '900', marginBottom: 4 },
   priceRow: { flexDirection: 'row', alignItems: 'baseline', marginBottom: 16 },
+  priceContainer: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4, flex: 1 },
   itemPrice: { fontSize: 20, fontWeight: '900' },
+  itemMrp: { fontSize: 13, textDecorationLine: 'line-through', marginLeft: 6, fontWeight: '500' },
+  discountBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, marginLeft: 6 },
+  discountText: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
   itemUnit: { fontSize: 12, fontWeight: '600', marginLeft: 2 },
   cardFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   stockBadge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10 },

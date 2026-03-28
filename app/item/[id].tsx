@@ -44,6 +44,7 @@ export default function ItemDetailScreen() {
         farmerName: profile?.name || 'Unknown Farmer',
         phoneNumber: profile?.phone || 'N/A',
         issue: `Order: ${item.name} (${item.category}) - ₹${item.price}`,
+        price: Number(item.price),
         status: 'Pending',
         type: 'Order',
         itemRef: item.id,
@@ -107,9 +108,19 @@ export default function ItemDetailScreen() {
         {item.description ? <Text style={[s.desc, { color: theme.textSecondary }]}>{item.description}</Text> : null}
 
         <View style={[s.statsRow, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <View style={s.stat}>
-            <Text style={[s.statLabel, { color: theme.textSecondary }]}>{t('price')}</Text>
-            <Text style={[s.statValue, { color: theme.tint }]}>₹{item.price}</Text>
+          <View style={s.priceWrapper}>
+            <View style={s.stat}>
+              <Text style={[s.statLabel, { color: theme.textSecondary }]}>{t('price')}</Text>
+              <Text style={[s.statValue, { color: theme.tint }]}>₹{item.price}</Text>
+            </View>
+            {item.mrp && item.mrp > item.price && (
+              <View style={s.mrpBadgeWrapper}>
+                 <Text style={[s.mrpText, { color: theme.textSecondary }]}>₹{item.mrp}</Text>
+                 <View style={[s.discountBadgeMinor, { backgroundColor: theme.tint + '15' }]}>
+                    <Text style={[s.discountTextMinor, { color: theme.tint }]}>-{item.discountPercentage}%</Text>
+                 </View>
+              </View>
+            )}
           </View>
           <View style={[s.divider, { backgroundColor: theme.border }]} />
           <View style={s.stat}>
@@ -160,9 +171,14 @@ const s = StyleSheet.create({
   name: { fontSize: 28, fontWeight: '900', letterSpacing: -0.5 },
   desc: { fontSize: 15, fontWeight: '500', lineHeight: 24 },
   statsRow: { flexDirection: 'row', borderRadius: 24, padding: 20, alignItems: 'center', borderWidth: 1 },
+  priceWrapper: { flex: 1.2 },
   stat: { flex: 1, alignItems: 'center' },
   statLabel: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
   statValue: { fontSize: 22, fontWeight: '900', marginTop: 4 },
+  mrpBadgeWrapper: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 4 },
+  mrpText: { fontSize: 12, textDecorationLine: 'line-through', fontWeight: '600', opacity: 0.6 },
+  discountBadgeMinor: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, marginLeft: 6 },
+  discountTextMinor: { fontSize: 10, fontWeight: '800' },
   divider: { width: 1, height: 40 },
   btn: {
     height: 60, borderRadius: 20,
